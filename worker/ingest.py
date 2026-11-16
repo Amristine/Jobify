@@ -42,7 +42,14 @@ pool = ConnectionPool(
 
 TERMS = [x.strip() for x in (os.getenv("JOB_SEARCH_TERMS") or "software engineer fresher,frontend developer fresher,backend developer fresher,data analyst fresher,AI ML intern,graduate engineer trainee").split(",") if x.strip()]
 SOURCES = [x.strip().lower() for x in (os.getenv("JOB_SOURCES") or "indeed,ats").split(",") if x.strip()]
-ATS_COMPANIES = [x.strip() for x in os.getenv("ATS_COMPANIES", "").split(",") if x.strip()]
+_ats_config = [x.strip() for x in os.getenv("ATS_COMPANIES", "").split(",") if x.strip()]
+ATS_COMPANIES = [
+    x for x in _ats_config
+    if ":" in x and x.split(":", 1)[0].strip().lower() in {"greenhouse", "lever", "ashby", "smartrecruiters"}
+    and x.split(":", 1)[1].strip()
+]
+if not ATS_COMPANIES:
+    ATS_COMPANIES = ["lever:drivetrain", "lever:meesho", "lever:paytm"]
 if os.getenv("ENABLE_LINKEDIN", "false").lower() == "true" and "linkedin" not in SOURCES:
     SOURCES.append("linkedin")
 AUTHORIZED_PROXY_SOURCES = {x.strip().lower() for x in os.getenv("AUTHORIZED_PROXY_SOURCES", "").split(",") if x.strip()}
@@ -240,6 +247,7 @@ def main():
     fetched = inserted = updated = skipped = errors = input_tokens = output_tokens = 0
     source_results = []
     seen_urls = set()
+    ai_quota_exhausted = False
 
     with pool.connection() as conn:
         run_id = conn.execute(
@@ -250,6 +258,9 @@ def main():
 
     try:
         for source in SOURCES:
+            if ai_quota_exhausted:
+                log.warning("Stopping remaining sources because Gemini quota is exhausted; rerun after quota resets or upgrade billing.")
+                break
             source_count = 0
             source_error = None
             for term_index, term in enumerate(TERMS):
@@ -335,6 +346,10 @@ def main():
                             source_count += 1
                         except Exception as exc:
                             errors += 1
+                            if "429" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc) or "quota" in str(exc).lower():
+                                ai_quota_exhausted = True
+                                log.error("Gemini quota exhausted; stopping classification to avoid repeated failed requests.")
+                                break
                             log.exception("Could not classify/store one listing from %s: %s", source, exc)
                 except Exception as exc:
                     errors += 1
