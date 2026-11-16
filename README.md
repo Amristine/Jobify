@@ -1,49 +1,38 @@
 # FresherFlow
 
-A fresher-first job discovery frontend built with Next.js, TypeScript, Tailwind CSS and Lucide icons.
+Fresher-first job discovery app: Next.js frontend, Supabase jobs API, and Python ingestion worker using JobSpy + Gemini.
 
-## Current status
+## Included
+- Responsive job search, filters, bookmarks and job cards
+- GET /api/jobs reads active fresher-friendly listings from Supabase
+- Supabase schema for jobs, ingestion runs and manual quality reviews
+- Python worker: authorised JobSpy sources, Gemini enrichment, URL-based deduplication
+- Daily GitHub Actions workflow at 02:30 UTC and manual dispatch
+- Per-source proxy configuration, gated by AUTHORIZED_PROXY_SOURCES
 
-The repository currently contains the **frontend prototype**. It uses illustrative local mock data so the experience can be designed and tested before connecting storage, ingestion sources or AI classification.
+## Supabase setup
+Create a dedicated FresherFlow project; do not reuse the unrelated ali-crm database. Run supabase/migrations/202611160001_fresherflow_core.sql in its SQL Editor.
 
-> Demo listings are illustrative and are not live vacancies.
+Set SUPABASE_URL and SUPABASE_SECRET_KEY for the Next.js server. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY) for the Python worker. Never expose either secret key in browser code or commit secrets.
 
-## Features
+## Local setup
+1. Copy .env.example to .env.local and fill the server-side values.
+2. Run npm install.
+3. Run npm run dev and open http://localhost:3000.
+4. Install Python dependencies with pip install -r worker/requirements.txt.
+5. Run the worker from the worker directory with the environment variables loaded: python ingest.py.
 
-- Responsive landing page and job discovery interface
-- Search by job title, company, role, city and skills
-- Filters for city, job type and role category
-- Job cards with company, location, compensation and skills
-- Save/bookmark interaction on job cards
-- Empty state and reset filters
-- About and how-it-works sections
+## GitHub Actions configuration
+Repository Settings > Secrets and variables > Actions:
+Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, GEMINI_API_KEY; optional PROXY_INDEED, PROXY_NAUKRI, PROXY_GLASSDOOR, PROXY_LINKEDIN.
+Variables: GEMINI_MODEL, JOB_SOURCES, JOB_SEARCH_TERMS, ENABLE_LINKEDIN, AUTHORIZED_PROXY_SOURCES, RESULTS_PER_SEARCH.
+The daily workflow can also be run manually from Actions.
 
-## Run locally
+## Source access and proxy policy
+Enable only sources for which automated collection is expressly permitted. LinkedIn is disabled unless explicitly enabled. A proxy is used only when the source is named in AUTHORIZED_PROXY_SOURCES and the corresponding PROXY_SOURCE variable is configured. No proxy rotation or retry is performed to defeat blocks, CAPTCHAs, authentication, or rate limits. JobSpy's MIT licence does not grant rights to third-party job-board content.
 
-Requirements: Node.js 18.18+ (Node.js 20 LTS recommended).
+## Evaluation
+Use job_reviews to hand-check 50 records. Role accuracy = correct role labels / reviewed role labels. City accuracy = correct city labels / reviewed city labels. Fresher precision = correct fresher-eligible inclusions / reviewed inclusions. Calculate cost per 1,000 from actual Gemini billing; ingestion_runs token counts are estimates only.
 
-```bash
-npm install
-npm run dev
-```
-
-Open http://localhost:3000.
-
-## Tech stack
-
-- Next.js App Router
-- React + TypeScript
-- Tailwind CSS v4
-- Lucide React
-
-## Roadmap
-
-1. Finish frontend UX and job detail interactions.
-2. Connect Supabase for persistent listings.
-3. Add permitted public-source ingestion and deduplication.
-4. Add Gemini classification with structured outputs.
-5. Add scheduled refresh, evaluation and cost reporting.
-
-## Data integrity
-
-Do not present sample records as real job openings. When live ingestion is added, each listing should retain its source, original application URL, collection timestamp and verification status.
+## Verification before calling it live
+Apply the migration to the dedicated project, configure keys, run npm run build, run one manual ingestion, verify jobs and ingestion_runs, check GET /api/jobs, then run the GitHub Actions workflow manually. The frontend intentionally falls back to clearly labelled demo listings until live data is available.
