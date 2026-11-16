@@ -26,7 +26,7 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(
 log = logging.getLogger("fresherflow-ingest")
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+SUPABASE_KEY = os.getenv("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 GEMINI_KEY = os.environ["GEMINI_API_KEY"]
 MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 db = create_client(SUPABASE_URL, SUPABASE_KEY)
