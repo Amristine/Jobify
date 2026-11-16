@@ -52,6 +52,8 @@ if not ATS_COMPANIES:
     ATS_COMPANIES = ["lever:drivetrain", "lever:meesho", "lever:paytm"]
 if os.getenv("ENABLE_LINKEDIN", "false").lower() == "true" and "linkedin" not in SOURCES:
     SOURCES.append("linkedin")
+if "ats" in SOURCES:
+    SOURCES = ["ats"] + [source for source in SOURCES if source != "ats"]
 AUTHORIZED_PROXY_SOURCES = {x.strip().lower() for x in os.getenv("AUTHORIZED_PROXY_SOURCES", "").split(",") if x.strip()}
 RESULTS_PER_SEARCH = max(1, min(int(os.getenv("RESULTS_PER_SEARCH") or "40"), 100))
 MAX_JOBS = max(1, int(os.getenv("MAX_JOBS_PER_RUN") or "500"))
