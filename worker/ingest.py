@@ -32,10 +32,7 @@ MODEL = os.getenv("GEMINI_MODEL") or "gemini-2.5-flash"
 db = create_client(SUPABASE_URL, SUPABASE_KEY)
 ai = genai.Client(api_key=GEMINI_KEY)
 
-TERMS = [x.strip() for x in os.getenv(
-    "JOB_SEARCH_TERMS",
-    ) or "software engineer fresher,frontend developer fresher,backend developer fresher,data analyst fresher,AI ML intern,graduate engineer trainee"
-).split(",") if x.strip()]
+TERMS = [x.strip() for x in (os.getenv("JOB_SEARCH_TERMS") or "software engineer fresher,frontend developer fresher,backend developer fresher,data analyst fresher,AI ML intern,graduate engineer trainee").split(",") if x.strip()]
 SOURCES = [x.strip().lower() for x in (os.getenv("JOB_SOURCES") or "indeed,naukri,glassdoor").split(",") if x.strip()]
 if os.getenv("ENABLE_LINKEDIN", "false").lower() == "true" and "linkedin" not in SOURCES:
     SOURCES.append("linkedin")
