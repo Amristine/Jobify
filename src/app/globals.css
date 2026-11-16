@@ -1,0 +1,20 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+:root{--ink:#17211d;--muted:#748078;--line:#e9eee9;--green:#176b4b;--mint:#eaf5ee;--paper:#fbfcfa}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:'DM Sans',sans-serif}
+button,input{font:inherit}
+button{cursor:pointer}
+::selection{background:#cde8d7;color:#153e2c}
+.font-display{font-family:'Manrope',sans-serif}
+.container{width:min(1160px,calc(100% - 48px));margin-inline:auto}
+.nav-link{color:#66736b;font-size:13px;font-weight:600;transition:color .2s}
+.nav-link:hover{color:var(--green)}
+.pill{border:1px solid var(--line);border-radius:999px;padding:8px 13px;font-size:12px;font-weight:600;color:#68746c;background:#fff;transition:all .2s}
+.pill.active,.pill:hover{border-color:#176b4b;background:#eaf5ee;color:#176b4b}
+.job-card{border:1px solid #e9eee9;background:#fff;border-radius:15px;transition:transform .2s,border-color .2s,box-shadow .2s}
+.job-card:hover{transform:translateY(-2px);border-color:#c9ddce;box-shadow:0 12px 30px #1c40200b}
+.icon-box{width:44px;height:44px;border:1px solid #edf0ec;border-radius:12px;display:grid;place-items:center;font-weight:800;font-size:15px}
+.soft-shadow{box-shadow:0 20px 60px #163b220d}
