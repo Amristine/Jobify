@@ -73,6 +73,7 @@ def proxy_for(source: str):
 
 
 def classify(job: dict) -> dict:
+    description = clean(job.get("description")) or "No description provided by source. Classify conservatively using only title, company, and location."
     prompt = f"""
 You classify Indian job postings for a fresher job board. Return ONLY valid JSON.
 Do not infer facts that are not in the posting. Mark fresher_eligible true only if
@@ -88,7 +89,7 @@ POSTING:
 Title: {job.get('title','')}
 Company: {job.get('company','')}
 Location: {job.get('location_text','')}
-Description: {job.get('description','')[:7000]}
+Description: {description[:7000]}
 """
     response = ai.models.generate_content(
         model=MODEL,
