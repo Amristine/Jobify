@@ -1,9 +1,4 @@
-"""Authorised JobSpy -> Gemini -> Supabase ingestion worker.
-
-A source is queried once per search term. There is deliberately no retry or
-proxy rotation after an access-denied/rate-limit response. Proxies are supplied
-only for source names explicitly listed in AUTHORIZED_PROXY_SOURCES.
-"""
+"""Authorised JobSpy -> Gemini -> Neon PostgreSQL ingestion worker."""
 from __future__ import annotations
 
 import hashlib
@@ -17,22 +12,30 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pandas as pd
+import psycopg
 from dotenv import load_dotenv
 from google import genai
 from jobspy import scrape_jobs
-from supabase import create_client
+from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env.local")
 load_dotenv()
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("fresherflow-ingest")
 
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.getenv("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+DATABASE_URL = os.environ["DATABASE_URL"]
 GEMINI_KEY = os.environ["GEMINI_API_KEY"]
 MODEL = os.getenv("GEMINI_MODEL") or "gemini-2.5-flash"
-db = create_client(SUPABASE_URL, SUPABASE_KEY)
 ai = genai.Client(api_key=GEMINI_KEY)
+pool = ConnectionPool(
+    conninfo=DATABASE_URL,
+    min_size=0,
+    max_size=2,
+    timeout=20,
+    kwargs={"sslmode": "require", "row_factory": dict_row, "prepare_threshold": None},
+    open=True,
+)
 
 TERMS = [x.strip() for x in (os.getenv("JOB_SEARCH_TERMS") or "software engineer fresher,frontend developer fresher,backend developer fresher,data analyst fresher,AI ML intern,graduate engineer trainee").split(",") if x.strip()]
 SOURCES = [x.strip().lower() for x in (os.getenv("JOB_SOURCES") or "indeed,naukri,glassdoor").split(",") if x.strip()]
@@ -42,10 +45,12 @@ AUTHORIZED_PROXY_SOURCES = {x.strip().lower() for x in os.getenv("AUTHORIZED_PRO
 RESULTS_PER_SEARCH = max(1, min(int(os.getenv("RESULTS_PER_SEARCH") or "40"), 100))
 MAX_JOBS = max(1, int(os.getenv("MAX_JOBS_PER_RUN", "500")))
 
+
 def clean(value) -> str:
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return ""
     return str(value).strip()
+
 
 def canonical_url(value: str) -> str:
     value = clean(value)
@@ -58,11 +63,13 @@ def canonical_url(value: str) -> str:
              if not k.lower().startswith("utm_") and k.lower() not in {"trk", "trackingid", "refid"}]
     return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), urlencode(query), ""))
 
+
 def proxy_for(source: str):
     if source not in AUTHORIZED_PROXY_SOURCES:
         return None
     proxy = os.getenv(f"PROXY_{source.upper()}", "").strip()
     return [proxy] if proxy else None
+
 
 def classify(job: dict) -> dict:
     prompt = f"""
@@ -98,14 +105,16 @@ Description: {job.get('description','')[:7000]}
         "ai_confidence": max(0.0, min(float(parsed.get("confidence", 0.0)), 1.0)),
     }
 
+
 def to_iso(value):
     if not value:
         return None
     try:
         stamp = pd.to_datetime(value, utc=True, errors="coerce")
-        return stamp.isoformat() if not pd.isna(stamp) else None
+        return stamp.to_pydatetime() if not pd.isna(stamp) else None
     except Exception:
         return None
+
 
 def normalise_row(row, source: str) -> dict | None:
     title, company = clean(row.get("title")), clean(row.get("company"))
@@ -114,13 +123,13 @@ def normalise_row(row, source: str) -> dict | None:
         return None
     location = clean(row.get("location"))
     bits = [x.strip() for x in re.split(r"[,|]", location) if x.strip()]
-    amount_min = row.get("min_amount")
-    amount_max = row.get("max_amount")
-    def number_or_none(x):
+
+    def number_or_none(value):
         try:
-            return float(x) if pd.notna(x) else None
+            return float(value) if pd.notna(value) else None
         except (TypeError, ValueError):
             return None
+
     return {
         "title": title[:500],
         "company": company[:300],
@@ -133,20 +142,26 @@ def normalise_row(row, source: str) -> dict | None:
         "source_name": source,
         "source_url": url,
         "source_posted_at": to_iso(row.get("date_posted")),
-        "salary_min": number_or_none(amount_min),
-        "salary_max": number_or_none(amount_max),
+        "salary_min": number_or_none(row.get("min_amount")),
+        "salary_max": number_or_none(row.get("max_amount")),
         "salary_currency": clean(row.get("currency")) or "INR",
         "salary_period": clean(row.get("interval")) or None,
         "content_hash": hashlib.sha256((title.lower() + "|" + company.lower() + "|" + location.lower()).encode()).hexdigest(),
     }
 
+
 def main():
     started = datetime.now(timezone.utc)
-    run = db.table("ingestion_runs").insert({"started_at": started.isoformat(), "status": "running", "sources": SOURCES}).execute()
-    run_id = run.data[0]["id"]
     fetched = inserted = updated = skipped = errors = input_tokens = output_tokens = 0
     source_results = []
     seen_urls = set()
+
+    with pool.connection() as conn:
+        run_id = conn.execute(
+            "INSERT INTO ingestion_runs (started_at, status, sources) VALUES (%s, 'running', %s) RETURNING id",
+            (started, json.dumps(SOURCES)),
+        ).fetchone()["id"]
+        conn.commit()
 
     try:
         for source in SOURCES:
@@ -181,16 +196,46 @@ def main():
                         seen_urls.add(base["source_url"])
                         try:
                             ai_fields = classify(base)
-                            # Token counts are estimates for the cost worksheet, not billing data.
                             input_tokens += max(1, (len(base.get("description") or "") + len(base["title"]) + 800) // 4)
                             output_tokens += 100
                             record = {**base, **ai_fields}
                             if not record["is_fresher_friendly"]:
                                 skipped += 1
                                 continue
-                            existing = db.table("jobs").select("id").eq("source_url", base["source_url"]).limit(1).execute()
-                            db.table("jobs").upsert(record, on_conflict="source_url").execute()
-                            if existing.data:
+                            with pool.connection() as conn:
+                                prior = conn.execute("SELECT id FROM jobs WHERE source_url = %s", (base["source_url"],)).fetchone()
+                                conn.execute(
+                                    """
+                                    INSERT INTO jobs (
+                                      title, company, city, state, country, location_text, job_type,
+                                      role_category, experience_level, salary_min, salary_max,
+                                      salary_currency, salary_period, description, skills, source_name,
+                                      source_url, source_posted_at, is_fresher_friendly, is_active,
+                                      ai_confidence, content_hash, collected_at, updated_at
+                                    ) VALUES (
+                                      %(title)s, %(company)s, %(city)s, %(state)s, %(country)s, %(location_text)s,
+                                      %(job_type)s, %(role_category)s, %(experience_level)s, %(salary_min)s,
+                                      %(salary_max)s, %(salary_currency)s, %(salary_period)s, %(description)s,
+                                      %(skills)s, %(source_name)s, %(source_url)s, %(source_posted_at)s,
+                                      %(is_fresher_friendly)s, true, %(ai_confidence)s, %(content_hash)s, now(), now()
+                                    )
+                                    ON CONFLICT (source_url) DO UPDATE SET
+                                      title = EXCLUDED.title, company = EXCLUDED.company,
+                                      city = EXCLUDED.city, state = EXCLUDED.state,
+                                      location_text = EXCLUDED.location_text, job_type = EXCLUDED.job_type,
+                                      role_category = EXCLUDED.role_category, experience_level = EXCLUDED.experience_level,
+                                      salary_min = EXCLUDED.salary_min, salary_max = EXCLUDED.salary_max,
+                                      salary_currency = EXCLUDED.salary_currency, salary_period = EXCLUDED.salary_period,
+                                      description = EXCLUDED.description, skills = EXCLUDED.skills,
+                                      source_posted_at = EXCLUDED.source_posted_at,
+                                      is_fresher_friendly = EXCLUDED.is_fresher_friendly,
+                                      ai_confidence = EXCLUDED.ai_confidence, content_hash = EXCLUDED.content_hash,
+                                      is_active = true, collected_at = now(), updated_at = now()
+                                    """,
+                                    {**record, "skills": record["skills"]},
+                                )
+                                conn.commit()
+                            if prior:
                                 updated += 1
                             else:
                                 inserted += 1
@@ -201,35 +246,39 @@ def main():
                 except Exception as exc:
                     errors += 1
                     source_error = str(exc)[:1000]
-                    # Intentionally do not retry or rotate proxy on access errors / rate limits.
                     log.exception("Source %s failed for search term %r", source, term)
                     break
             source_results.append({"source": source, "saved": source_count, "error": source_error})
+
         status = "failed" if errors and not (inserted + updated) else ("partial" if errors else "success")
-        db.table("ingestion_runs").update({
-            "finished_at": datetime.now(timezone.utc).isoformat(),
-            "status": status,
-            "sources": source_results,
-            "fetched_count": fetched,
-            "inserted_count": inserted,
-            "updated_count": updated,
-            "skipped_count": skipped,
-            "error_count": errors,
-            "estimated_ai_input_tokens": input_tokens,
-            "estimated_ai_output_tokens": output_tokens,
-            "error_summary": json.dumps(source_results)[:5000] if errors else None,
-        }).eq("id", run_id).execute()
+        with pool.connection() as conn:
+            conn.execute(
+                """
+                UPDATE ingestion_runs SET finished_at = %s, status = %s, sources = %s,
+                  fetched_count = %s, inserted_count = %s, updated_count = %s,
+                  skipped_count = %s, error_count = %s, estimated_ai_input_tokens = %s,
+                  estimated_ai_output_tokens = %s, error_summary = %s
+                WHERE id = %s
+                """,
+                (datetime.now(timezone.utc), status, json.dumps(source_results), fetched,
+                 inserted, updated, skipped, errors, input_tokens, output_tokens,
+                 json.dumps(source_results)[:5000] if errors else None, run_id),
+            )
+            conn.commit()
         log.info("Ingestion complete: fetched=%s inserted=%s updated=%s skipped=%s errors=%s", fetched, inserted, updated, skipped, errors)
         if errors and not (inserted + updated):
             sys.exit(1)
     except Exception as exc:
-        db.table("ingestion_runs").update({
-            "finished_at": datetime.now(timezone.utc).isoformat(),
-            "status": "failed",
-            "error_count": errors + 1,
-            "error_summary": str(exc)[:5000],
-        }).eq("id", run_id).execute()
+        with pool.connection() as conn:
+            conn.execute(
+                "UPDATE ingestion_runs SET finished_at = %s, status = 'failed', error_count = %s, error_summary = %s WHERE id = %s",
+                (datetime.now(timezone.utc), errors + 1, str(exc)[:5000], run_id),
+            )
+            conn.commit()
         raise
+    finally:
+        pool.close()
+
 
 if __name__ == "__main__":
     main()
