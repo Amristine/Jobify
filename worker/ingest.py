@@ -265,13 +265,13 @@ def main():
                         frame = fetch_ats_jobs()
                     else:
                         kwargs = {
-                        "site_name": [source],
-                        "search_term": term,
-                        "location": "India",
-                        "results_wanted": min(RESULTS_PER_SEARCH, MAX_JOBS - fetched),
-                        "hours_old": 168,
-                        "linkedin_fetch_description": False,
-                    }
+                            "site_name": [source],
+                            "search_term": term,
+                            "location": "India",
+                            "results_wanted": min(RESULTS_PER_SEARCH, MAX_JOBS - fetched),
+                            "hours_old": 168,
+                            "linkedin_fetch_description": False,
+                        }
                         if source == "indeed":
                             kwargs["country_indeed"] = "India"
                         proxy = proxy_for(source)
