@@ -7,6 +7,8 @@ import logging
 import os
 import re
 import sys
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -39,7 +41,8 @@ pool = ConnectionPool(
 )
 
 TERMS = [x.strip() for x in (os.getenv("JOB_SEARCH_TERMS") or "software engineer fresher,frontend developer fresher,backend developer fresher,data analyst fresher,AI ML intern,graduate engineer trainee").split(",") if x.strip()]
-SOURCES = [x.strip().lower() for x in (os.getenv("JOB_SOURCES") or "indeed,naukri,glassdoor").split(",") if x.strip()]
+SOURCES = [x.strip().lower() for x in (os.getenv("JOB_SOURCES") or "indeed,ats").split(",") if x.strip()]
+ATS_COMPANIES = [x.strip() for x in os.getenv("ATS_COMPANIES", "").split(",") if x.strip()]
 if os.getenv("ENABLE_LINKEDIN", "false").lower() == "true" and "linkedin" not in SOURCES:
     SOURCES.append("linkedin")
 AUTHORIZED_PROXY_SOURCES = {x.strip().lower() for x in os.getenv("AUTHORIZED_PROXY_SOURCES", "").split(",") if x.strip()}
@@ -70,6 +73,86 @@ def proxy_for(source: str):
         return None
     proxy = os.getenv(f"PROXY_{source.upper()}", "").strip()
     return [proxy] if proxy else None
+
+
+
+def fetch_ats_jobs() -> pd.DataFrame:
+    """Read public employer job-board APIs. Configure boards as provider:board-slug."""
+    rows = []
+    india_places = {
+        "india", "bengaluru", "bangalore", "mumbai", "pune", "hyderabad",
+        "chennai", "delhi", "gurugram", "gurgaon", "noida", "kolkata",
+        "ahmedabad", "jaipur", "kochi", "coimbatore", "indore"
+    }
+
+    def get_json(url: str):
+        request = urllib.request.Request(
+            url, headers={"User-Agent": "FresherFlow/1.0 (public careers API reader)", "Accept": "application/json"}
+        )
+        with urllib.request.urlopen(request, timeout=25) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    for entry in ATS_COMPANIES:
+        try:
+            provider, board = entry.split(":", 1)
+            provider, board = provider.strip().lower(), board.strip()
+            if not board:
+                raise ValueError("missing board slug")
+            jobs = []
+            if provider == "greenhouse":
+                payload = get_json(f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs?content=true")
+                for item in payload.get("jobs", []):
+                    jobs.append({
+                        "title": item.get("title"), "company": board,
+                        "location": (item.get("location") or {}).get("name", ""),
+                        "job_url": item.get("absolute_url"), "description": item.get("content"),
+                        "date_posted": item.get("updated_at"), "job_type": "Unknown"
+                    })
+            elif provider == "lever":
+                payload = get_json(f"https://api.lever.co/v0/postings/{board}?mode=json")
+                for item in payload if isinstance(payload, list) else []:
+                    categories = item.get("categories") or {}
+                    jobs.append({
+                        "title": item.get("text"), "company": board,
+                        "location": categories.get("location", ""),
+                        "job_url": item.get("hostedUrl"), "description": item.get("descriptionPlain") or item.get("description"),
+                        "date_posted": item.get("createdAt"), "job_type": categories.get("commitment", "Unknown")
+                    })
+            elif provider == "ashby":
+                payload = get_json(f"https://api.ashbyhq.com/posting-api/job-board/{board}?includeCompensation=false")
+                for item in payload.get("jobs", []):
+                    jobs.append({
+                        "title": item.get("title"), "company": board,
+                        "location": item.get("location", ""),
+                        "job_url": item.get("jobUrl"), "description": item.get("descriptionPlain") or item.get("description"),
+                        "date_posted": item.get("publishedAt"), "job_type": item.get("employmentType", "Unknown")
+                    })
+            elif provider == "smartrecruiters":
+                payload = get_json(f"https://api.smartrecruiters.com/v1/companies/{board}/postings?limit=100")
+                for item in payload.get("content", []):
+                    loc = item.get("location") or {}
+                    jobs.append({
+                        "title": item.get("name"), "company": board,
+                        "location": ", ".join(x for x in [loc.get("city"), loc.get("region"), loc.get("country")] if x),
+                        "job_url": (item.get("ref") or item.get("applyUrl")),
+                        "description": "", "date_posted": item.get("releasedDate"), "job_type": "Unknown"
+                    })
+            else:
+                log.warning("Unsupported ATS provider %r in ATS_COMPANIES; skipping", provider)
+                continue
+
+            for job in jobs:
+                loc = clean(job.get("location")).lower()
+                if loc and not any(place in loc for place in india_places):
+                    continue
+                if not loc:
+                    continue
+                job["company"] = job.get("company") or board
+                rows.append(job)
+            log.info("ATS board %s:%s returned %s India-location postings", provider, board, sum(1 for j in jobs if clean(j.get("location")).lower() and any(p in clean(j.get("location")).lower() for p in india_places)))
+        except Exception as exc:
+            log.warning("Could not read ATS board %s: %s", entry, str(exc)[:500])
+    return pd.DataFrame(rows)
 
 
 def classify(job: dict) -> dict:
@@ -169,11 +252,19 @@ def main():
         for source in SOURCES:
             source_count = 0
             source_error = None
-            for term in TERMS:
+            for term_index, term in enumerate(TERMS):
+                if source == "ats" and term_index > 0:
+                    break
                 if fetched >= MAX_JOBS:
                     break
                 try:
-                    kwargs = {
+                    if source == "ats":
+                        if not ATS_COMPANIES:
+                            log.warning("ATS source selected but ATS_COMPANIES is empty; configure provider:board-slug entries")
+                            break
+                        frame = fetch_ats_jobs()
+                    else:
+                        kwargs = {
                         "site_name": [source],
                         "search_term": term,
                         "location": "India",
@@ -181,12 +272,12 @@ def main():
                         "hours_old": 168,
                         "linkedin_fetch_description": False,
                     }
-                    if source == "indeed":
-                        kwargs["country_indeed"] = "India"
-                    proxy = proxy_for(source)
-                    if proxy:
-                        kwargs["proxies"] = proxy
-                    frame = scrape_jobs(**kwargs)
+                        if source == "indeed":
+                            kwargs["country_indeed"] = "India"
+                        proxy = proxy_for(source)
+                        if proxy:
+                            kwargs["proxies"] = proxy
+                        frame = scrape_jobs(**kwargs)
                     if frame is None or frame.empty:
                         continue
                     for _, series in frame.iterrows():
@@ -249,6 +340,9 @@ def main():
                     errors += 1
                     source_error = str(exc)[:1000]
                     log.exception("Source %s failed for search term %r", source, term)
+                    # A blocked source should not generate hundreds of identical failures.
+                    if "403" in str(exc) or "blocked" in str(exc).lower() or "forbidden" in str(exc).lower():
+                        log.warning("Stopping source %s after an access-denied response; use an authorised feed/API instead.", source)
                     break
             source_results.append({"source": source, "saved": source_count, "error": source_error})
 
