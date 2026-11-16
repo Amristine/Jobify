@@ -13,6 +13,7 @@ import os
 import re
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import pandas as pd
@@ -21,6 +22,7 @@ from google import genai
 from jobspy import scrape_jobs
 from supabase import create_client
 
+load_dotenv(Path(__file__).resolve().parents[1] / ".env.local")
 load_dotenv()
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("fresherflow-ingest")
