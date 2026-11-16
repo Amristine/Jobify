@@ -34,6 +34,7 @@ jobs:
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           JOB_SOURCES: ${{ vars.JOB_SOURCES }}
+          ATS_COMPANIES: ${{ vars.ATS_COMPANIES }}
           ENABLE_LINKEDIN: ${{ vars.ENABLE_LINKEDIN }}
           JOB_SEARCH_TERMS: ${{ vars.JOB_SEARCH_TERMS }}
           RESULTS_PER_SEARCH: ${{ vars.RESULTS_PER_SEARCH }}
