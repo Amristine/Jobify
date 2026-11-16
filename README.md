@@ -6,7 +6,7 @@ Fresher-first job discovery app: Next.js frontend, Neon PostgreSQL jobs API, and
 - Responsive job search, filters, bookmarks and job cards
 - GET /api/jobs reads active fresher-friendly listings from Neon
 - PostgreSQL schema for jobs, ingestion runs and manual quality reviews
-- Python worker: authorised JobSpy sources, Gemini enrichment, URL-based deduplication
+- Python worker: authorised JobSpy sources plus public Greenhouse, Lever, Ashby and SmartRecruiters job-board APIs; Gemini enrichment and URL-based deduplication
 - Daily GitHub Actions workflow at 02:30 UTC and manual dispatch
 - Neon pooled connections for Vercel serverless functions and short-lived worker connections
 
@@ -28,7 +28,9 @@ Do not reuse an unrelated CRM database. Never commit connection strings or expos
 ## GitHub Actions configuration
 Repository Settings → Secrets and variables → Actions:
 - Secrets: `DATABASE_URL`, `GEMINI_API_KEY`; optional `PROXY_INDEED`, `PROXY_NAUKRI`, `PROXY_GLASSDOOR`, `PROXY_LINKEDIN`.
-- Variables: `GEMINI_MODEL`, `JOB_SOURCES`, `JOB_SEARCH_TERMS`, `ENABLE_LINKEDIN`, `AUTHORIZED_PROXY_SOURCES`, `RESULTS_PER_SEARCH`, `MAX_JOBS_PER_RUN`.
+- Variables: `GEMINI_MODEL`, `JOB_SOURCES` (start with `indeed,ats`), `ATS_COMPANIES`, `JOB_SEARCH_TERMS`, `ENABLE_LINKEDIN`, `AUTHORIZED_PROXY_SOURCES`, `RESULTS_PER_SEARCH`, `MAX_JOBS_PER_RUN`.
+
+`ATS_COMPANIES` is a comma-separated list of public employer board identifiers in `provider:slug` form, for example `greenhouse:companyslug,lever:companyslug,ashby:boardname,smartrecruiters:companyslug`. Only add company boards whose public job-board endpoints and reuse terms permit automated access. The worker filters to India-located postings, deduplicates by canonical apply URL, and classifies fresher eligibility with Gemini. It does not bypass access controls.
 
 The workflow runs daily at 02:30 UTC (08:00 IST) and can also be run manually from Actions.
 
