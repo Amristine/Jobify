@@ -28,19 +28,19 @@ log = logging.getLogger("fresherflow-ingest")
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.getenv("SUPABASE_SECRET_KEY") or os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 GEMINI_KEY = os.environ["GEMINI_API_KEY"]
-MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+MODEL = os.getenv("GEMINI_MODEL") or "gemini-2.5-flash"
 db = create_client(SUPABASE_URL, SUPABASE_KEY)
 ai = genai.Client(api_key=GEMINI_KEY)
 
 TERMS = [x.strip() for x in os.getenv(
     "JOB_SEARCH_TERMS",
-    "software engineer fresher,frontend developer fresher,backend developer fresher,data analyst fresher,AI ML intern,graduate engineer trainee",
+    ) or "software engineer fresher,frontend developer fresher,backend developer fresher,data analyst fresher,AI ML intern,graduate engineer trainee"
 ).split(",") if x.strip()]
-SOURCES = [x.strip().lower() for x in os.getenv("JOB_SOURCES", "indeed,naukri,glassdoor").split(",") if x.strip()]
+SOURCES = [x.strip().lower() for x in (os.getenv("JOB_SOURCES") or "indeed,naukri,glassdoor").split(",") if x.strip()]
 if os.getenv("ENABLE_LINKEDIN", "false").lower() == "true" and "linkedin" not in SOURCES:
     SOURCES.append("linkedin")
 AUTHORIZED_PROXY_SOURCES = {x.strip().lower() for x in os.getenv("AUTHORIZED_PROXY_SOURCES", "").split(",") if x.strip()}
-RESULTS_PER_SEARCH = max(1, min(int(os.getenv("RESULTS_PER_SEARCH", "40")), 100))
+RESULTS_PER_SEARCH = max(1, min(int(os.getenv("RESULTS_PER_SEARCH") or "40"), 100))
 MAX_JOBS = max(1, int(os.getenv("MAX_JOBS_PER_RUN", "500")))
 
 def clean(value) -> str:
@@ -94,7 +94,7 @@ Description: {job.get('description','')[:7000]}
         "city": clean(parsed.get("city")) or job.get("city") or None,
         "job_type": clean(parsed.get("job_type")) or job.get("job_type") or "Unknown",
         "experience_level": clean(parsed.get("experience_level")) or "Fresher",
-        "is_fresher_friendly": bool(parsed.get("fresher_eligible", False)),
+        "is_fresher_friendly": parsed.get("fresher_eligible") is True,
         "skills": [clean(x) for x in parsed.get("skills", []) if clean(x)][:8],
         "ai_confidence": max(0.0, min(float(parsed.get("confidence", 0.0)), 1.0)),
     }
