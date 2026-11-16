@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from google import genai
 from jobspy import scrape_jobs
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env.local")
@@ -159,7 +160,7 @@ def main():
     with pool.connection() as conn:
         run_id = conn.execute(
             "INSERT INTO ingestion_runs (started_at, status, sources) VALUES (%s, 'running', %s) RETURNING id",
-            (started, json.dumps(SOURCES)),
+            (started, Jsonb(SOURCES)),
         ).fetchone()["id"]
         conn.commit()
 
@@ -260,7 +261,7 @@ def main():
                   estimated_ai_output_tokens = %s, error_summary = %s
                 WHERE id = %s
                 """,
-                (datetime.now(timezone.utc), status, json.dumps(source_results), fetched,
+                (datetime.now(timezone.utc), status, Jsonb(source_results), fetched,
                  inserted, updated, skipped, errors, input_tokens, output_tokens,
                  json.dumps(source_results)[:5000] if errors else None, run_id),
             )
