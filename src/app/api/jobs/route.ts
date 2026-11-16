@@ -11,40 +11,79 @@ export async function GET(request: NextRequest) {
     const city = params.get("city");
     const type = params.get("type");
     const role = params.get("role");
-    const limit = Math.min(Math.max(Number(params.get("limit") || 100), 1), 250);
+
+    const limit = Math.min(
+      Math.max(Number(params.get("limit") || 100), 1),
+      250
+    );
+
     const db = getDb();
 
     const conditions = [
-      db`is_active = true`,
-      db`is_fresher_friendly = true`,
+      "is_active = true",
+      "is_fresher_friendly = true",
     ];
 
-    if (city && city !== "All cities") conditions.push(db`city ILIKE ${city}`);
-    if (type && type !== "All types") conditions.push(db`job_type ILIKE ${type}`);
-    if (role && role !== "All opportunities") conditions.push(db`role_category ILIKE ${role}`);
-    if (search) {
-      const term = `%${search.replace(/[\\%_]/g, " ").trim()}%`;
-      conditions.push(db`(title ILIKE ${term} OR company ILIKE ${term} OR city ILIKE ${term} OR role_category ILIKE ${term})`);
+    const values: (string | number)[] = [];
+
+    const addFilter = (column: string, value: string) => {
+      values.push(value);
+      conditions.push(`${column} ILIKE $${values.length}`);
+    };
+
+    if (city && city !== "All cities") {
+      addFilter("city", city);
     }
 
-    const jobs = await db`
+    if (type && type !== "All types") {
+      addFilter("job_type", type);
+    }
+
+    if (role && role !== "All opportunities") {
+      addFilter("role_category", role);
+    }
+
+    if (search) {
+      values.push(`%${search.replace(/[%_\\]/g, " ").trim()}%`);
+      const p = `$${values.length}`;
+
+      conditions.push(
+        `(title ILIKE ${p} OR company ILIKE ${p} OR city ILIKE ${p} OR role_category ILIKE ${p})`
+      );
+    }
+
+    values.push(limit);
+
+    const query = `
       SELECT id, title, company, city, state, country, location_text,
              job_type, role_category, experience_level, salary_min, salary_max,
              salary_currency, salary_period, description, skills, source_name,
              source_url, source_posted_at, collected_at, ai_confidence
       FROM jobs
-      WHERE ${db`.join(conditions, db` AND `)`}
+      WHERE ${conditions.join(" AND ")}
       ORDER BY source_posted_at DESC NULLS LAST, collected_at DESC
-      LIMIT ${limit}
+      LIMIT $${values.length}
     `;
 
-    return NextResponse.json({ jobs, count: jobs.length, source: "neon" });
+    const jobs = await db.unsafe(query, values);
+
+    return NextResponse.json({
+      jobs,
+      count: jobs.length,
+      source: "neon",
+    });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to load jobs";
+    const message =
+      error instanceof Error ? error.message : "Unable to load jobs";
+
     console.error("GET /api/jobs failed:", message);
+
     return NextResponse.json(
-      { error: "Job listings are temporarily unavailable. Please retry shortly.", jobs: [] },
-      { status: 503 },
+      {
+        error: "Job listings are temporarily unavailable. Please retry shortly.",
+        jobs: [],
+      },
+      { status: 503 }
     );
   }
 }
