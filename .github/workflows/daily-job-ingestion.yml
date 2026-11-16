@@ -32,12 +32,12 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
           JOB_SOURCES: ${{ vars.JOB_SOURCES }}
           ENABLE_LINKEDIN: ${{ vars.ENABLE_LINKEDIN }}
           JOB_SEARCH_TERMS: ${{ vars.JOB_SEARCH_TERMS }}
           RESULTS_PER_SEARCH: ${{ vars.RESULTS_PER_SEARCH }}
+          MAX_JOBS_PER_RUN: ${{ vars.MAX_JOBS_PER_RUN }}
           AUTHORIZED_PROXY_SOURCES: ${{ vars.AUTHORIZED_PROXY_SOURCES }}
           PROXY_INDEED: ${{ secrets.PROXY_INDEED }}
           PROXY_NAUKRI: ${{ secrets.PROXY_NAUKRI }}
