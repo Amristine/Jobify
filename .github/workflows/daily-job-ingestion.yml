@@ -1,0 +1,46 @@
+name: Daily FresherFlow job ingestion
+
+on:
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fresherflow-ingestion
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: worker/requirements.txt
+      - name: Install dependencies
+        run: pip install -r worker/requirements.txt
+      - name: Run ingestion
+        working-directory: worker
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          JOB_SOURCES: ${{ vars.JOB_SOURCES }}
+          ENABLE_LINKEDIN: ${{ vars.ENABLE_LINKEDIN }}
+          JOB_SEARCH_TERMS: ${{ vars.JOB_SEARCH_TERMS }}
+          RESULTS_PER_SEARCH: ${{ vars.RESULTS_PER_SEARCH }}
+          AUTHORIZED_PROXY_SOURCES: ${{ vars.AUTHORIZED_PROXY_SOURCES }}
+          PROXY_INDEED: ${{ secrets.PROXY_INDEED }}
+          PROXY_NAUKRI: ${{ secrets.PROXY_NAUKRI }}
+          PROXY_GLASSDOOR: ${{ secrets.PROXY_GLASSDOOR }}
+          PROXY_LINKEDIN: ${{ secrets.PROXY_LINKEDIN }}
+        run: python ingest.py
